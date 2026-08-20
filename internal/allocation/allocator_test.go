@@ -3,40 +3,12 @@ package allocation
 import (
 	"errors"
 	"fmt"
-	"sync"
 	"testing"
-	"time"
 )
 
-const testTTL = 30 * time.Second
-
-// fakeClock is mutex-guarded because the concurrency tests read it from many
-// goroutines while the test body advances it.
-type fakeClock struct {
-	mu sync.Mutex
-	t  time.Time
-}
-
-func newClock() *fakeClock {
-	return &fakeClock{t: time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)}
-}
-
-func (c *fakeClock) now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.t
-}
-
-func (c *fakeClock) advance(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.t = c.t.Add(d)
-}
-
-func newTestRegistry(t *testing.T) (*Registry, *fakeClock) {
+func newTestRegistry(t *testing.T) *Registry {
 	t.Helper()
-	clk := newClock()
-	return NewWithClock(testTTL, clk.now), clk
+	return New()
 }
 
 func report(id, region string, capacity, current int) Report {
@@ -81,7 +53,7 @@ func TestUpsertNode_ReportRebasesExternalLoad(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			r, _ := newTestRegistry(t)
+			r := newTestRegistry(t)
 			r.UpsertNode(report("node-1", "eu-west", 100, 0))
 			for i := range tc.placed {
 				mustAllocate(t, r, fmt.Sprintf("call-%d", i), "eu-west")
@@ -105,7 +77,7 @@ func TestUpsertNode_ReportRebasesExternalLoad(t *testing.T) {
 // report and diverge immediately after, which is the whole reason for the extra
 // counter.
 func TestUpsertNode_PlacementsAfterAReportStillCount(t *testing.T) {
-	r, _ := newTestRegistry(t)
+	r := newTestRegistry(t)
 	r.UpsertNode(report("node-1", "eu-west", 100, 0))
 	for i := range 25 {
 		mustAllocate(t, r, fmt.Sprintf("ours-%d", i), "eu-west")
@@ -126,7 +98,7 @@ func TestUpsertNode_PlacementsAfterAReportStillCount(t *testing.T) {
 }
 
 func TestAllocate_PicksMostAvailableNode(t *testing.T) {
-	r, _ := newTestRegistry(t)
+	r := newTestRegistry(t)
 	// Utilisation ordering would pick node-c and saturate four slots while 150
 	// sit idle elsewhere.
 	r.UpsertNode(report("node-a", "eu-west", 1000, 900))
@@ -139,7 +111,7 @@ func TestAllocate_PicksMostAvailableNode(t *testing.T) {
 }
 
 func TestAllocate_IgnoresOtherRegions(t *testing.T) {
-	r, _ := newTestRegistry(t)
+	r := newTestRegistry(t)
 	r.UpsertNode(report("node-us", "us-east", 1000, 0))
 	r.UpsertNode(report("node-eu", "eu-west", 10, 0))
 
@@ -155,7 +127,7 @@ func TestAllocate_IgnoresOtherRegions(t *testing.T) {
 func TestAllocate_TieBreakIsDeterministic(t *testing.T) {
 	// Go randomises map iteration, so a single pass proves nothing.
 	for range 100 {
-		r, _ := newTestRegistry(t)
+		r := newTestRegistry(t)
 		r.UpsertNode(report("node-c", "eu-west", 100, 0))
 		r.UpsertNode(report("node-a", "eu-west", 100, 0))
 		r.UpsertNode(report("node-b", "eu-west", 100, 0))
@@ -167,7 +139,7 @@ func TestAllocate_TieBreakIsDeterministic(t *testing.T) {
 }
 
 func TestAllocate_SpreadsLoadBetweenReports(t *testing.T) {
-	r, _ := newTestRegistry(t)
+	r := newTestRegistry(t)
 	r.UpsertNode(report("node-a", "eu-west", 100, 0))
 	r.UpsertNode(report("node-b", "eu-west", 100, 0))
 
@@ -184,7 +156,7 @@ func TestAllocate_SpreadsLoadBetweenReports(t *testing.T) {
 }
 
 func TestAllocate_AffinityReturnsTheSameNode(t *testing.T) {
-	r, _ := newTestRegistry(t)
+	r := newTestRegistry(t)
 	r.UpsertNode(report("node-a", "eu-west", 100, 0))
 	r.UpsertNode(report("node-b", "eu-west", 100, 0))
 
@@ -211,22 +183,10 @@ func TestAllocate_AffinityReturnsTheSameNode(t *testing.T) {
 	}
 }
 
-func TestAllocate_AffinityOutlivesNodeHealth(t *testing.T) {
-	r, clk := newTestRegistry(t)
-	r.UpsertNode(report("node-a", "eu-west", 1, 0))
-	pinned := mustAllocate(t, r, "abc123", "eu-west")
-
-	clk.advance(testTTL + time.Second) // node-a stops reporting
-
-	if got := mustAllocate(t, r, "abc123", "eu-west"); got != pinned {
-		t.Errorf("got %q, want the pinned %q: media already flowing cannot be re-homed", got, pinned)
-	}
-}
-
 // "It must always return the same node while the call remains active" admits no
 // exception, so a caller naming a different region still gets the pinned node.
 func TestAllocate_AffinityOutlivesARegionChange(t *testing.T) {
-	r, _ := newTestRegistry(t)
+	r := newTestRegistry(t)
 	r.UpsertNode(report("node-eu", "eu-west", 100, 0))
 	r.UpsertNode(report("node-us", "us-east", 100, 0))
 	mustAllocate(t, r, "abc123", "eu-west")
@@ -253,7 +213,7 @@ func TestAllocate_AffinityOutlivesARegionChange(t *testing.T) {
 }
 
 func TestAllocate_RejectsWhenRegionIsFull(t *testing.T) {
-	r, _ := newTestRegistry(t)
+	r := newTestRegistry(t)
 	r.UpsertNode(report("node-a", "eu-west", 2, 0))
 
 	mustAllocate(t, r, "call-1", "eu-west")
@@ -270,30 +230,8 @@ func TestAllocate_RejectsWhenRegionIsFull(t *testing.T) {
 	}
 }
 
-func TestAllocate_SkipsStaleNodes(t *testing.T) {
-	r, clk := newTestRegistry(t)
-	r.UpsertNode(report("node-quiet", "eu-west", 100, 0))
-	r.UpsertNode(report("node-live", "eu-west", 10, 0))
-
-	clk.advance(testTTL + time.Second)
-	r.UpsertNode(report("node-live", "eu-west", 10, 0)) // only this one reports again
-
-	if got := mustAllocate(t, r, "call-1", "eu-west"); got != "node-live" {
-		t.Errorf("got %q, want node-live: a node that stopped reporting is not a placement target", got)
-	}
-	if !nodeState(t, r, "node-quiet").Stale {
-		t.Error("node-quiet should be reported stale")
-	}
-
-	// A node is excluded, never forgotten, so it recovers on its next report.
-	r.UpsertNode(report("node-quiet", "eu-west", 100, 0))
-	if got := mustAllocate(t, r, "call-2", "eu-west"); got != "node-quiet" {
-		t.Errorf("got %q, want node-quiet back in service", got)
-	}
-}
-
 func TestAllocate_ZeroCapacityNodeIsDrained(t *testing.T) {
-	r, _ := newTestRegistry(t)
+	r := newTestRegistry(t)
 	r.UpsertNode(report("node-a", "eu-west", 0, 0))
 
 	if _, _, err := r.Allocate("call-1", "eu-west"); !errors.Is(err, ErrNoCapacity) {
@@ -302,7 +240,7 @@ func TestAllocate_ZeroCapacityNodeIsDrained(t *testing.T) {
 }
 
 func TestUpsertNode_CapacityCutBelowLiveCalls(t *testing.T) {
-	r, _ := newTestRegistry(t)
+	r := newTestRegistry(t)
 	// A real state, not an error: the node is telling us it shrank under load.
 	r.UpsertNode(report("node-a", "eu-west", 10, 25))
 
@@ -316,7 +254,7 @@ func TestUpsertNode_CapacityCutBelowLiveCalls(t *testing.T) {
 }
 
 func TestTerminate_ReleasesCapacityExactlyOnce(t *testing.T) {
-	r, _ := newTestRegistry(t)
+	r := newTestRegistry(t)
 	r.UpsertNode(report("node-a", "eu-west", 1, 0))
 	mustAllocate(t, r, "call-1", "eu-west")
 
@@ -339,14 +277,14 @@ func TestTerminate_ReleasesCapacityExactlyOnce(t *testing.T) {
 }
 
 func TestTerminate_UnknownCall(t *testing.T) {
-	r, _ := newTestRegistry(t)
+	r := newTestRegistry(t)
 	if err := r.Terminate("never-existed"); !errors.Is(err, ErrCallNotFound) {
 		t.Errorf("got %v, want ErrCallNotFound", err)
 	}
 }
 
 func TestGet_ReturnsThePlacement(t *testing.T) {
-	r, _ := newTestRegistry(t)
+	r := newTestRegistry(t)
 	r.UpsertNode(report("node-a", "eu-west", 10, 0))
 	mustAllocate(t, r, "abc123", "eu-west")
 
@@ -363,7 +301,7 @@ func TestGet_ReturnsThePlacement(t *testing.T) {
 }
 
 func TestSnapshot_EmptyRegistryIsNotNil(t *testing.T) {
-	r, _ := newTestRegistry(t)
+	r := newTestRegistry(t)
 	// A nil slice marshals to null, which is the first thing a reviewer would see
 	// from GET /nodes on a freshly started service.
 	if got := r.Snapshot(); got == nil {
@@ -372,7 +310,7 @@ func TestSnapshot_EmptyRegistryIsNotNil(t *testing.T) {
 }
 
 func TestUpsertNode_ReportsCreation(t *testing.T) {
-	r, _ := newTestRegistry(t)
+	r := newTestRegistry(t)
 	if created := r.UpsertNode(report("node-a", "eu-west", 10, 0)); !created {
 		t.Error("first registration should report created")
 	}

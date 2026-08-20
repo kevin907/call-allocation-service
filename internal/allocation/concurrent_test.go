@@ -39,7 +39,7 @@ func assertInvariants(t *testing.T, r *Registry) {
 func TestAllocate_SameCallIDConcurrently(t *testing.T) {
 	const goroutines = 100
 
-	r, _ := newTestRegistry(t)
+	r := newTestRegistry(t)
 	for _, id := range []string{"node-a", "node-b", "node-c"} {
 		r.UpsertNode(report(id, "eu-west", 100, 0))
 	}
@@ -97,7 +97,7 @@ func TestAllocate_DistinctCallsNeverExceedCapacity(t *testing.T) {
 		wantRefused = goroutines - totalSlots
 	)
 
-	r, _ := newTestRegistry(t)
+	r := newTestRegistry(t)
 	r.UpsertNode(report("node-a", "eu-west", perNode, 0))
 	r.UpsertNode(report("node-b", "eu-west", perNode, 0))
 
@@ -145,7 +145,7 @@ func TestAllocate_DistinctCallsNeverExceedCapacity(t *testing.T) {
 func TestRegistry_MixedWorkloadKeepsAccountingHonest(t *testing.T) {
 	const calls = 300
 
-	r, _ := newTestRegistry(t)
+	r := newTestRegistry(t)
 	r.UpsertNode(report("node-a", "eu-west", 1000, 0))
 	r.UpsertNode(report("node-b", "eu-west", 1000, 0))
 

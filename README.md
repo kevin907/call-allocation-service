@@ -103,7 +103,7 @@ have placed 1, so its load is 21 and 79 slots remain:
 ```
 curl localhost:8080/nodes
 
-{"nodes":[{"id":"node-eu-1","region":"eu-west","capacity":100,"reportedCalls":20,"placedCalls":1,"externalCalls":20,"load":21,"available":79,"lastSeen":"...","stale":false}, ...]}
+{"nodes":[{"id":"node-eu-1","region":"eu-west","capacity":100,"reportedCalls":20,"placedCalls":1,"externalCalls":20,"load":21,"available":79,"lastSeen":"..."}, ...]}
 ```
 
 End the call, then end it again:
@@ -118,13 +118,14 @@ curl -i -X DELETE localhost:8080/calls/abc123    # 404 Not Found
 | Variable | Default | Meaning |
 |---|---|---|
 | `PORT` | `8080` | listen port |
-| `NODE_TTL` | `30s` | a node unheard from for longer is excluded from new allocations |
 | `SHUTDOWN_TIMEOUT` | `10s` | how long in-flight requests get to finish after `SIGTERM` |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 
-Nodes are expected to report at least every 10 seconds; `NODE_TTL` allows two consecutive reports
-to be lost before a node is treated as gone. An unparseable value is a startup failure rather
-than a silent fallback.
+An unparseable value is a startup failure rather than a silent fallback.
+
+A registered node stays eligible until it is replaced by a newer report. The brief does not define
+a reporting interval, so the service does not invent one and never expires a node — see
+[DESIGN.md](DESIGN.md).
 
 ## Docker
 

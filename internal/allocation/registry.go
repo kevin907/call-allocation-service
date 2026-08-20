@@ -52,6 +52,7 @@ type Allocation struct {
 
 // NodeStatus is the operator's view of one node. Both raw counts are exposed
 // alongside the derived ones so the reconciliation can be checked by eye.
+// LastSeen is reported but never acted on; see DESIGN.md on node expiry.
 type NodeStatus struct {
 	ID            string    `json:"id"`
 	Region        string    `json:"region"`
@@ -62,7 +63,6 @@ type NodeStatus struct {
 	Load          int       `json:"load"`
 	Available     int       `json:"available"`
 	LastSeen      time.Time `json:"lastSeen"`
-	Stale         bool      `json:"stale"`
 }
 
 // Registry holds the whole service state. Every method takes mu for its entire
@@ -73,21 +73,12 @@ type Registry struct {
 	mu    sync.Mutex
 	nodes map[string]*node
 	calls map[string]*call
-	ttl   time.Duration
-	now   func() time.Time
 }
 
-func New(ttl time.Duration) *Registry {
-	return NewWithClock(ttl, time.Now)
-}
-
-// NewWithClock lets tests advance time by hand rather than sleeping.
-func NewWithClock(ttl time.Duration, now func() time.Time) *Registry {
+func New() *Registry {
 	return &Registry{
 		nodes: make(map[string]*node),
 		calls: make(map[string]*call),
-		ttl:   ttl,
-		now:   now,
 	}
 }
 
@@ -111,7 +102,7 @@ func (r *Registry) UpsertNode(rep Report) bool {
 	// Rebasing rather than accumulating is what keeps the figure honest between
 	// reports; see DESIGN.md.
 	n.external = max(0, rep.CurrentCalls-n.placed)
-	n.lastSeen = r.now()
+	n.lastSeen = time.Now()
 
 	return !found
 }
@@ -190,10 +181,5 @@ func (r *Registry) statusLocked(n *node) NodeStatus {
 		Load:          n.load(),
 		Available:     n.available(),
 		LastSeen:      n.lastSeen,
-		Stale:         r.staleLocked(n),
 	}
-}
-
-func (r *Registry) staleLocked(n *node) bool {
-	return r.now().Sub(n.lastSeen) > r.ttl
 }

@@ -20,7 +20,6 @@ import (
 
 type config struct {
 	addr            string
-	nodeTTL         time.Duration
 	shutdownTimeout time.Duration
 	logLevel        slog.Level
 }
@@ -39,7 +38,7 @@ func run() error {
 	}
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.logLevel}))
-	registry := allocation.New(cfg.nodeTTL)
+	registry := allocation.New()
 
 	srv := &http.Server{
 		Addr:    cfg.addr,
@@ -61,7 +60,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	log.Info("listening", "addr", listener.Addr().String(), "nodeTTL", cfg.nodeTTL.String())
+	log.Info("listening", "addr", listener.Addr().String())
 
 	serverErr := make(chan error, 1)
 	go func() {
@@ -90,12 +89,11 @@ func run() error {
 }
 
 // loadConfig reads the environment and fails rather than falling back on a
-// default: a mistyped NODE_TTL silently reverting to 30s is how a node fleet
-// ends up being declared dead at the wrong moment.
+// default, because a mistyped value that silently reverts is worse than a
+// process that refuses to start.
 func loadConfig() (config, error) {
 	cfg := config{
 		addr:            ":8080",
-		nodeTTL:         30 * time.Second,
 		shutdownTimeout: 10 * time.Second,
 		logLevel:        slog.LevelInfo,
 	}
@@ -108,22 +106,12 @@ func loadConfig() (config, error) {
 		cfg.addr = ":" + v
 	}
 
-	for _, field := range []struct {
-		name string
-		dst  *time.Duration
-	}{
-		{"NODE_TTL", &cfg.nodeTTL},
-		{"SHUTDOWN_TIMEOUT", &cfg.shutdownTimeout},
-	} {
-		v, ok := os.LookupEnv(field.name)
-		if !ok {
-			continue
-		}
+	if v, ok := os.LookupEnv("SHUTDOWN_TIMEOUT"); ok {
 		d, err := time.ParseDuration(v)
 		if err != nil || d <= 0 {
-			return cfg, fmt.Errorf("%s: %q is not a positive duration", field.name, v)
+			return cfg, fmt.Errorf("SHUTDOWN_TIMEOUT: %q is not a positive duration", v)
 		}
-		*field.dst = d
+		cfg.shutdownTimeout = d
 	}
 
 	if v, ok := os.LookupEnv("LOG_LEVEL"); ok {

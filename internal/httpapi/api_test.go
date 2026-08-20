@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/kevin907/call-allocation-service/internal/allocation"
 	"github.com/kevin907/call-allocation-service/internal/httpapi"
@@ -17,7 +16,7 @@ import (
 
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	registry := allocation.New(30 * time.Second)
+	registry := allocation.New()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := httptest.NewServer(httpapi.NewServer(registry, log).Handler())
 	t.Cleanup(srv.Close)
