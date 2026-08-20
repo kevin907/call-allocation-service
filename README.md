@@ -33,7 +33,7 @@ It listens on `:8080`.
 | `GET` | `/calls/{callId}` | – | `200` | `400` `404` |
 | `DELETE` | `/calls/{callId}` | – | `204` | `400` `404` |
 | `GET` | `/healthz` | – | `200` liveness | – |
-| `GET` | `/readyz` | – | `200` readiness, reports fleet size | – |
+| `GET` | `/readyz` | – | `200` readiness | – |
 
 Errors are `{"error":"<code>","message":"<human>"}`. The codes are `invalid_request`,
 `id_mismatch`, `call_not_found`, `no_nodes_in_region`, `no_capacity`, `payload_too_large`,

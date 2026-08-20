@@ -38,13 +38,14 @@ Termination frees the slot; an unknown call is `404`.
 
 State dies with the process, so the Deployment uses `Recreate`: at one replica a rolling update
 still rounds `maxSurge` up to one pod, and two instances with disjoint call tables would briefly
-share one Service. Liveness is deliberately slack — a restart destroys every mapping — while
-readiness never gates on node count, since nodes register through the Service it controls.
+share one Service. Liveness is deliberately slack — a restart destroys every mapping — while readiness reads no
+state and takes no lock: nodes register through the Service it controls, and sharing the
+allocator's mutex would let load push the only pod out of the endpoints.
 
 **Node expiry is deliberately absent.** A node that stops reporting stays eligible, so calls can
 go to one that is gone. Production would drop it after a few missed heartbeats — `lastSeen` is
-reported for exactly that — but the brief defines no reporting interval, and inventing one risks
-rejecting a node the operator considers healthy.
+reported for that — but the brief defines no reporting interval, and inventing one risks rejecting
+a node the operator considers healthy.
 
 **Also out of scope:** multiple replicas (affinity needs shared state), persistence, reaping
 abandoned calls, cross-region overflow, node deregistration (`capacity: 0` drains), auth and TLS,

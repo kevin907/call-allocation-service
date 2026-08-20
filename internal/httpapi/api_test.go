@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -387,17 +388,21 @@ func TestHealthAndReadiness(t *testing.T) {
 		t.Errorf("healthz status = %d, want 200", resp.StatusCode)
 	}
 
-	// Readiness reports the fleet size but must never gate on it.
-	resp := do(t, srv, http.MethodGet, "/readyz", "")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("readyz on an empty registry: status = %d, want 200", resp.StatusCode)
+	// Readiness must not depend on fleet state, so it answers identically with an
+	// empty registry and a populated one.
+	empty := do(t, srv, http.MethodGet, "/readyz", "")
+	if empty.StatusCode != http.StatusOK {
+		t.Fatalf("readyz on an empty registry: status = %d, want 200", empty.StatusCode)
 	}
-	if got := decode(t, resp)["nodes"]; got != float64(0) {
-		t.Errorf("nodes = %v, want 0", got)
-	}
+	emptyBody := decode(t, empty)
 
 	registerNode(t, srv, "node-a", "eu-west", 10, 0)
-	if got := decode(t, do(t, srv, http.MethodGet, "/readyz", ""))["nodes"]; got != float64(1) {
-		t.Errorf("nodes = %v, want 1", got)
+
+	populated := do(t, srv, http.MethodGet, "/readyz", "")
+	if populated.StatusCode != http.StatusOK {
+		t.Fatalf("readyz with a node registered: status = %d, want 200", populated.StatusCode)
+	}
+	if got := decode(t, populated); !reflect.DeepEqual(got, emptyBody) {
+		t.Errorf("readyz changed with fleet state: %v then %v", emptyBody, got)
 	}
 }

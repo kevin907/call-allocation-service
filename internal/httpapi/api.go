@@ -201,12 +201,11 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// readyz reports the fleet size but never gates on it. Nodes register through
-// the same Service readiness controls, so refusing traffic while the registry is
-// empty would be a deadlock the service could not escape.
+// readyz answers whether this process can serve requests, which it can as soon
+// as it is listening. It deliberately touches no registry state and takes no
+// lock: nodes register through the very Service readiness controls, so gating on
+// the fleet would be a deadlock, and gating on the allocator's mutex would let
+// allocation load push the pod out of the endpoints.
 func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "ready",
-		"nodes":  s.registry.NodeCount(),
-	})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }

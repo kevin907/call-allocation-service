@@ -167,10 +167,3 @@ func (r *Registry) Node(id string) (NodeStatus, bool) {
 	}
 	return n.status(), true
 }
-
-// NodeCount reports how many nodes have registered, for the readiness endpoint.
-func (r *Registry) NodeCount() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return len(r.nodes)
-}
