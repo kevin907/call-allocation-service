@@ -39,8 +39,7 @@ Errors are `{"error":"<code>","message":"<human>"}`. The codes are `invalid_requ
 `id_mismatch`, `call_not_found`, `no_nodes_in_region`, `no_capacity`, `payload_too_large`,
 `unsupported_media_type` and `internal`.
 
-`id` in the node body is optional; the path is authoritative and a disagreement is a `400`. Both
-`503`s carry `Retry-After`. Unknown paths and wrong methods are answered by the standard library,
+`id` in the node body is optional; the path is authoritative and a disagreement is a `400`. Unknown paths and wrong methods are answered by the standard library,
 so those two responses are plain text rather than JSON — a deliberate trade against writing
 middleware to reformat them.
 
@@ -60,7 +59,7 @@ curl -X PUT localhost:8080/nodes/node-us-1 -H 'Content-Type: application/json' \
 ```
 
 Allocate a call. `node-eu-1` wins with 80 free slots against `node-eu-2`'s 50, even though it is
-the busier node in percentage terms:
+the busier node in percentage terms — the policy ranks on absolute remaining capacity:
 
 ```
 curl -X POST localhost:8080/calls -H 'Content-Type: application/json' \

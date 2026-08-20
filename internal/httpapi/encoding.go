@@ -120,10 +120,6 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 		status, code, message = http.StatusInternalServerError, codeInternal, "internal error"
 	}
 
-	// Both 503s are transient, so say so rather than leaving the client to guess.
-	if status == http.StatusServiceUnavailable {
-		w.Header().Set("Retry-After", "5")
-	}
 	writeJSON(w, status, apiError{Code: code, Message: message})
 }
 

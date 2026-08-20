@@ -247,9 +247,6 @@ func TestAllocate_UnavailableRegions(t *testing.T) {
 			if got := errorCode(t, resp); got != tc.wantCode {
 				t.Errorf("error = %q, want %q", got, tc.wantCode)
 			}
-			if got := resp.Header.Get("Retry-After"); got != "5" {
-				t.Errorf("Retry-After = %q, want 5", got)
-			}
 		})
 	}
 }

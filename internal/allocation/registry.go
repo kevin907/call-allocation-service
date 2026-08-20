@@ -58,10 +58,10 @@ type NodeStatus struct {
 	LastSeen     time.Time `json:"lastSeen"`
 }
 
-// Registry holds the whole service state. Every method takes mu for its entire
-// body: allocation is a read-modify-write, so there is no read-mostly path that
-// would justify an RWMutex, and splitting the critical section is how affinity
-// races get in.
+// Registry holds the whole service state. One mutex covers both maps: allocation
+// has to hold it across the affinity lookup, the selection and the reservation,
+// because those are one state transition rather than three. An RWMutex would be
+// correct too, but buys little when the main operation is a write anyway.
 type Registry struct {
 	mu    sync.Mutex
 	nodes map[string]*node
@@ -128,34 +128,42 @@ func (r *Registry) Get(callID string) (Allocation, error) {
 	return c.allocation(), nil
 }
 
-// Snapshot returns the fleet ordered by id.
+func (n *node) status() NodeStatus {
+	return NodeStatus{
+		ID:           n.id,
+		Region:       n.region,
+		Capacity:     n.capacity,
+		CurrentCalls: n.currentCalls,
+		Available:    n.available(),
+		LastSeen:     n.lastSeen,
+	}
+}
+
+// Snapshot returns the fleet ordered by id. The sort happens after the lock is
+// released, since it only touches the copy.
 func (r *Registry) Snapshot() []NodeStatus {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	out := make([]NodeStatus, 0, len(r.nodes))
 	for _, n := range r.nodes {
-		out = append(out, NodeStatus{
-			ID:           n.id,
-			Region:       n.region,
-			Capacity:     n.capacity,
-			CurrentCalls: n.currentCalls,
-			Available:    n.available(),
-			LastSeen:     n.lastSeen,
-		})
+		out = append(out, n.status())
 	}
+	r.mu.Unlock()
+
 	slices.SortFunc(out, func(a, b NodeStatus) int { return strings.Compare(a.ID, b.ID) })
 	return out
 }
 
-// Node returns one node's status.
+// Node returns one node's status. Registration calls this on every report, so it
+// is a map lookup rather than a walk of the whole fleet.
 func (r *Registry) Node(id string) (NodeStatus, bool) {
-	for _, n := range r.Snapshot() {
-		if n.ID == id {
-			return n, true
-		}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	n, ok := r.nodes[id]
+	if !ok {
+		return NodeStatus{}, false
 	}
-	return NodeStatus{}, false
+	return n.status(), true
 }
 
 // NodeCount reports how many nodes have registered, for the readiness endpoint.

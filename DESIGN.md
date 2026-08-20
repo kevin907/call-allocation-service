@@ -2,19 +2,21 @@
 
 ## Allocation
 
-Within the requested region a call goes to the healthy node with the most **absolute free
-capacity** (`capacity - load`), ties broken on lowest node id, so selection is deterministic
-and testable. Full nodes are ineligible: capacity is a hard limit, not a queue.
+Within the requested region a call goes to the node with the greatest **absolute remaining
+capacity** (`capacity - currentCalls`), ties broken on lowest node id so selection is
+deterministic and testable. Full nodes are ineligible: capacity is a hard budget, not a queue.
 
-Headroom beats utilisation ratio — given nodes of 1000/900, 100/50 and 4/0, ratio ordering
-saturates the four-slot node while 150 slots sit idle. Ratio would be safer only if capacity were
-a soft estimate.
+The alternative is lowest utilisation (`currentCalls / capacity`), which spreads proportionally
+across differently sized nodes. Neither dominates — headroom equalises free slots, utilisation
+equalises percentages. I chose headroom because the exercise presents capacity as an absolute call
+count; were it relative compute power, weighted utilisation would fit better.
 
 ## State and load
 
-One mutex guards two maps, nodes and calls. Allocation is a read-modify-write — resolve affinity,
-choose a node, record it — so it is one critical section, not three; an RWMutex would invite a
-check-then-act race no detector can see.
+One mutex guards both maps. Allocation holds it across the affinity lookup, the selection and the
+reservation, because those are one state transition — splitting them into separately locked read
+and write stages is what would race. An RWMutex would be correct too, but buys little when the
+main operation writes anyway.
 
 The exercise does not define how `currentCalls` relates to placements this service has just made,
 so the rule is plain: a report replaces the node's figure, an allocation increments it, a
@@ -27,11 +29,10 @@ need an explicit ownership protocol.
 
 A call's node is recorded at placement and returned on every repeat, making allocation safely
 retryable after a timeout. Affinity resolves before any capacity or region filter: flowing media
-cannot be re-homed by editing a map. **Trade-off:** so a live `callId` re-allocated into a
-*different* region still returns its pinned node, the mismatch logged rather than raised. A `409`
-would serve the caller better but would break a stated requirement to satisfy an inferred one.
-Termination frees the slot; an unknown call is `404`, though a retry-prone caller would prefer
-`204`.
+cannot be re-homed by editing a map. **Trade-off:** a live `callId` re-allocated into a *different*
+region therefore still returns its pinned node, the mismatch logged rather than raised. A `409`
+would serve the caller better but breaks a stated requirement to satisfy an inferred one.
+Termination frees the slot; an unknown call is `404`.
 
 ## One instance
 
@@ -41,8 +42,8 @@ share one Service. Liveness is deliberately slack — a restart destroys every m
 readiness never gates on node count, since nodes register through the Service it controls.
 
 **Node expiry is deliberately absent.** A node that stops reporting stays eligible, so calls can
-go to one that is gone. Production would drop it after a few missed heartbeats and `lastSeen` is
-reported for exactly that, but the brief defines no reporting interval and inventing one risks
+go to one that is gone. Production would drop it after a few missed heartbeats — `lastSeen` is
+reported for exactly that — but the brief defines no reporting interval, and inventing one risks
 rejecting a node the operator considers healthy.
 
 **Also out of scope:** multiple replicas (affinity needs shared state), persistence, reaping

@@ -66,10 +66,11 @@ func (r *Registry) pickLocked(region string) (*node, error) {
 	return best, nil
 }
 
-// better ranks by absolute free capacity, then by id. Ranking by free slots
-// rather than by utilisation stops a small node being saturated while a large
-// one still has room. The id tie-break is deliberate: Go randomises map order,
-// so without it the choice would be arbitrary by accident rather than by design.
+// better ranks by absolute free capacity, then by id. The alternative is lowest
+// utilisation, which spreads proportionally rather than towards whichever node
+// has the most room; see DESIGN.md for why this one. The id tie-break is
+// deliberate: Go randomises map order, so without it the choice would be
+// arbitrary by accident rather than by design.
 func better(a, b *node) bool {
 	if b == nil {
 		return true

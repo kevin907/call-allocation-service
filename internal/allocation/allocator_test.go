@@ -38,8 +38,8 @@ func mustAllocate(t *testing.T, r *Registry, callID, region string) string {
 
 func TestAllocate_PicksMostAvailableNode(t *testing.T) {
 	r := newTestRegistry(t)
-	// Utilisation ordering would pick node-c and saturate four slots while 150
-	// sit idle elsewhere.
+	// The three policies disagree on the first call: utilisation picks node-c at
+	// 0%, least-loaded picks node-c too, absolute headroom picks node-a.
 	r.UpsertNode(report("node-a", "eu-west", 1000, 900))
 	r.UpsertNode(report("node-b", "eu-west", 100, 50))
 	r.UpsertNode(report("node-c", "eu-west", 4, 0))
