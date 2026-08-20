@@ -49,9 +49,11 @@ func logRequests(log *slog.Logger, next http.Handler) http.Handler {
 
 		level := slog.LevelInfo
 		switch {
-		case rec.status >= http.StatusInternalServerError:
+		case rec.status >= http.StatusInternalServerError && rec.status != http.StatusServiceUnavailable:
 			level = slog.LevelError
 		case rec.status >= http.StatusBadRequest:
+			// 503 lands here on purpose: a full or unknown region is the allocator
+			// answering correctly, not the service failing.
 			level = slog.LevelWarn
 		}
 

@@ -75,11 +75,13 @@ func New() *Registry {
 	}
 }
 
-// UpsertNode applies a capacity report, creating the node if it is unknown, and
-// reports whether it was created. The reported figure replaces whatever we were
-// holding, because the node is the authority on its own load; allocations made
-// since then adjust it locally until the next report arrives.
-func (r *Registry) UpsertNode(rep Report) bool {
+// UpsertNode applies a capacity report, creating the node if it is unknown. It
+// returns the resulting status and whether the node was new, so a caller that
+// wants to echo the node back does not have to take the lock a second time.
+//
+// The reported figure replaces whatever we were holding, because the node is the
+// authority on its own load; allocations adjust it locally until the next report.
+func (r *Registry) UpsertNode(rep Report) (NodeStatus, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -94,7 +96,7 @@ func (r *Registry) UpsertNode(rep Report) bool {
 	n.currentCalls = rep.CurrentCalls
 	n.lastSeen = time.Now()
 
-	return !found
+	return n.status(), !found
 }
 
 // Terminate ends an active call and returns its slot to the node.
@@ -108,8 +110,8 @@ func (r *Registry) Terminate(callID string) error {
 	}
 	delete(r.calls, callID)
 
-	// The node may have vanished since the call was placed, so only give back a
-	// slot we can still see.
+	// Nothing removes a node today, so the lookup always succeeds; the guard is
+	// here so adding deregistration later cannot silently drive the count negative.
 	if n, ok := r.nodes[c.nodeID]; ok && n.currentCalls > 0 {
 		n.currentCalls--
 	}

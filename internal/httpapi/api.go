@@ -102,7 +102,7 @@ func (s *Server) upsertNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created := s.registry.UpsertNode(allocation.Report{
+	node, created := s.registry.UpsertNode(allocation.Report{
 		ID:           id,
 		Region:       region,
 		Capacity:     capacity,
@@ -113,7 +113,6 @@ func (s *Server) upsertNode(w http.ResponseWriter, r *http.Request) {
 	if created {
 		status = http.StatusCreated
 	}
-	node, _ := s.registry.Node(id)
 	writeJSON(w, status, node)
 }
 

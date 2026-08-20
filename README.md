@@ -27,9 +27,9 @@ It listens on `:8080`.
 
 | Method | Path | Body | Success | Errors |
 |---|---|---|---|---|
-| `PUT` | `/nodes/{id}` | `{"id","region","capacity","currentCalls"}` | `201` first registration, `200` refresh | `400` |
+| `PUT` | `/nodes/{id}` | `{"id","region","capacity","currentCalls"}` | `201` first registration, `200` refresh | `400` `413` `415` |
 | `GET` | `/nodes` | – | `200` fleet view | – |
-| `POST` | `/calls` | `{"callId","region"}` | `201` placed (+ `Location`), `200` already active | `400` `503` |
+| `POST` | `/calls` | `{"callId","region"}` | `201` placed (+ `Location`), `200` already active | `400` `413` `415` `503` |
 | `GET` | `/calls/{callId}` | – | `200` | `400` `404` |
 | `DELETE` | `/calls/{callId}` | – | `204` | `400` `404` |
 | `GET` | `/healthz` | – | `200` liveness | – |
@@ -39,13 +39,15 @@ Errors are `{"error":"<code>","message":"<human>"}`. The codes are `invalid_requ
 `id_mismatch`, `call_not_found`, `no_nodes_in_region`, `no_capacity`, `payload_too_large`,
 `unsupported_media_type` and `internal`.
 
-`id` in the node body is optional; the path is authoritative and a disagreement is a `400`. Unknown paths and wrong methods are answered by the standard library,
+`id` in the node body is optional; the path is authoritative and a disagreement is a `400`.
+Unknown paths and wrong methods are answered by the standard library,
 so those two responses are plain text rather than JSON — a deliberate trade against writing
 middleware to reformat them.
 
 ## Walkthrough
 
-Every command below is copy-pasteable, and the output is what the service actually returns.
+Every command below is copy-pasteable, and the output is the service's own, with only the
+timestamp elided.
 
 Register three nodes across two regions:
 
@@ -93,7 +95,7 @@ A region nobody has registered in:
 curl -X POST localhost:8080/calls -H 'Content-Type: application/json' \
   -d '{"callId":"zzz","region":"ap-south"}'
 
-{"error":"no_nodes_in_region","message":"no healthy node registered in region"}
+{"error":"no_nodes_in_region","message":"no node registered in region"}
 ```
 
 The fleet view. `node-eu-1` last reported 20 calls and we have placed one on it since, so it is
@@ -158,9 +160,10 @@ kubectl -n call-allocation port-forward svc/call-allocation-service 8080:80
 ```
 
 The files are numbered because `kubectl apply -f k8s/` walks the directory in lexical order and
-the namespace has to exist first. `imagePullPolicy: IfNotPresent` is what makes the locally built
-image usable without a registry; on minikube use `minikube image load` and on k3d `k3d image
-import` in place of `kind load`.
+the namespace has to exist first. `imagePullPolicy: IfNotPresent` is set explicitly to say the
+image comes from the node rather than a registry; a `:latest` tag would default to `Always` and
+fail here. On minikube use `minikube image load` and on k3d `k3d image import` in place of
+`kind load`.
 
 Tear down with `kind delete cluster --name pexip`.
 
@@ -178,13 +181,13 @@ one slot, the other runs 200 concurrent allocations against 10 slots and asserts
 succeed. Both are the requirements that naive implementations get wrong.
 
 [scripts/verify-k8s.sh](scripts/verify-k8s.sh) covers what unit tests cannot. It builds the
-image, stands up a throwaway kind cluster, applies the manifests and asserts 25 things about the
+image, stands up a throwaway kind cluster, applies the manifests and makes 29 assertions about the
 running deployment — that the Service selector actually matches a pod, that the probes pass, that
 the container survives its own `securityContext`, that the API answers through the Service, that
 a rollout never runs two pods at once, that state is gone afterwards, and that probe traffic
-stays out of the log. It creates the cluster only if one is not already there, removes it again
-if it did, and exits with the number of failed checks.
+stays out of the log. It creates the cluster only if one is not already there, and removes it
+again if it did.
 
 A client-side dry-run proves only that the YAML parses; every failure listed above is invisible
-to it. Both suites run in CI on every push and pull request — see
+to it. Both suites run in CI on pull requests and on pushes to `main` — see
 [.github/workflows/ci.yml](.github/workflows/ci.yml).

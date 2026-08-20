@@ -47,8 +47,8 @@ func badRequest(format string, args ...any) statusError {
 }
 
 // decodeJSON reads exactly one JSON object from the request body. Unknown fields
-// are rejected because the alternative is worse: a node that misspells
-// "capacity" would register with none and silently stop receiving calls.
+// are rejected so a typo comes back naming the field the caller got wrong; a
+// misspelled required field is caught either way by the pointer checks below.
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	if err := requireJSONContentType(r); err != nil {
 		return err

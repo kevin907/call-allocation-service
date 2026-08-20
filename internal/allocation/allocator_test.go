@@ -18,13 +18,11 @@ func report(id, region string, capacity, current int) Report {
 // nodeState reads a node's counters through the same view the API exposes.
 func nodeState(t *testing.T, r *Registry, id string) NodeStatus {
 	t.Helper()
-	for _, n := range r.Snapshot() {
-		if n.ID == id {
-			return n
-		}
+	n, ok := r.Node(id)
+	if !ok {
+		t.Fatalf("node %q not registered", id)
 	}
-	t.Fatalf("node %q not registered", id)
-	return NodeStatus{}
+	return n
 }
 
 func mustAllocate(t *testing.T, r *Registry, callID, region string) string {
@@ -38,8 +36,8 @@ func mustAllocate(t *testing.T, r *Registry, callID, region string) string {
 
 func TestAllocate_PicksMostAvailableNode(t *testing.T) {
 	r := newTestRegistry(t)
-	// The three policies disagree on the first call: utilisation picks node-c at
-	// 0%, least-loaded picks node-c too, absolute headroom picks node-a.
+	// Utilisation and least-loaded both pick node-c on the first call; only
+	// absolute headroom picks node-a.
 	r.UpsertNode(report("node-a", "eu-west", 1000, 900))
 	r.UpsertNode(report("node-b", "eu-west", 100, 50))
 	r.UpsertNode(report("node-c", "eu-west", 4, 0))
@@ -282,13 +280,17 @@ func TestSnapshot_EmptyRegistryIsNotNil(t *testing.T) {
 
 func TestUpsertNode_ReportsCreation(t *testing.T) {
 	r := newTestRegistry(t)
-	if created := r.UpsertNode(report("node-a", "eu-west", 10, 0)); !created {
+	if _, created := r.UpsertNode(report("node-a", "eu-west", 10, 0)); !created {
 		t.Error("first registration should report created")
 	}
-	if created := r.UpsertNode(report("node-a", "eu-west", 20, 0)); created {
+	got, created := r.UpsertNode(report("node-a", "eu-west", 20, 0))
+	if created {
 		t.Error("a refresh should not report created")
 	}
-	if got := nodeState(t, r, "node-a"); got.Capacity != 20 {
+	if got.Capacity != 20 {
 		t.Errorf("capacity = %d, want the refreshed 20", got.Capacity)
+	}
+	if _, ok := r.Node("nope"); ok {
+		t.Error("Node reported an unregistered id as present")
 	}
 }
