@@ -4,23 +4,24 @@
 
 Within the requested region a call goes to the healthy node with the most **absolute free
 capacity** (`capacity - load`), ties broken on lowest node id, so selection is deterministic
-and testable. Full nodes are ineligible: media capacity is a hard limit, not a queue.
+and testable. Full nodes are ineligible: capacity is a hard limit, not a queue.
 
 Headroom beats utilisation ratio — given nodes of 1000/900, 100/50 and 4/0, ratio ordering
 saturates the four-slot node while 150 slots sit idle. Ratio would be safer only if capacity were
 a soft estimate.
 
-## Counting load
+## State and load
 
-Nodes report `currentCalls` periodically, but we also know what we just placed there. Trusting the
-report alone stampedes one node: every call between two heartbeats sees the same snapshot and
-picks the same winner.
+One mutex guards two maps, nodes and calls. Allocation is a read-modify-write — resolve affinity,
+choose a node, record it — so it is one critical section, not three; an RWMutex would invite a
+check-then-act race no detector can see.
 
-So each node keeps `reported`, `placed` (ours) and `external`; every report rebases
-`external = max(0, reported - placed)`, leaving `placed` alone. `max(reported, placed)` agrees
-only at the instant of a report — with reported 45 and placed 25, five further placements
-give 50 under the rebase but 45 under the max. **Limitation:** this converges within one report
-interval rather than being exact.
+The exercise does not define how `currentCalls` relates to placements this service has just made,
+so the rule is plain: a report replaces the node's figure, an allocation increments it, a
+termination decrements it. The local adjustment is what matters: trusting the last report alone
+would send every call in a reporting interval to the same node.
+**Limitation:** a late report overwrites adjustments made since it was generated; production would
+need an explicit ownership protocol.
 
 ## Affinity and lifecycle
 
@@ -39,11 +40,11 @@ still rounds `maxSurge` up to one pod, and two instances with disjoint call tabl
 share one Service. Liveness is deliberately slack — a restart destroys every mapping — while
 readiness never gates on node count, since nodes register through the Service it controls.
 
-**Node expiry is deliberately absent.** A node that stops reporting stays eligible forever, so
-calls can go to one that is gone. Production would drop a node after a few missed heartbeats, and
-`lastSeen` is reported for exactly that — but the brief defines no reporting interval, and
-inventing one risks rejecting a node the operator considers healthy.
+**Node expiry is deliberately absent.** A node that stops reporting stays eligible, so calls can
+go to one that is gone. Production would drop it after a few missed heartbeats and `lastSeen` is
+reported for exactly that, but the brief defines no reporting interval and inventing one risks
+rejecting a node the operator considers healthy.
 
 **Also out of scope:** multiple replicas (affinity needs shared state), persistence, reaping
-abandoned calls (the map grows unbounded), cross-region overflow, node deregistration
-(`capacity: 0` drains), auth and TLS, HPA and PDB, metrics.
+abandoned calls, cross-region overflow, node deregistration (`capacity: 0` drains), auth and TLS,
+HPA and PDB, metrics.

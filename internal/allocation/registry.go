@@ -19,17 +19,14 @@ type Report struct {
 }
 
 type node struct {
-	id       string
-	region   string
-	capacity int
-	reported int // the node's own last currentCalls figure
-	placed   int // calls we pinned here and have not yet terminated
-	external int // load we did not place, rebased at every report
-	lastSeen time.Time
+	id           string
+	region       string
+	capacity     int
+	currentCalls int
+	lastSeen     time.Time
 }
 
-func (n *node) load() int      { return n.placed + n.external }
-func (n *node) available() int { return n.capacity - n.load() }
+func (n *node) available() int { return n.capacity - n.currentCalls }
 
 type call struct {
 	id          string
@@ -50,19 +47,15 @@ type Allocation struct {
 	AllocatedAt time.Time
 }
 
-// NodeStatus is the operator's view of one node. Both raw counts are exposed
-// alongside the derived ones so the reconciliation can be checked by eye.
-// LastSeen is reported but never acted on; see DESIGN.md on node expiry.
+// NodeStatus is the operator's view of one node. LastSeen is reported but never
+// acted on; see DESIGN.md on node expiry.
 type NodeStatus struct {
-	ID            string    `json:"id"`
-	Region        string    `json:"region"`
-	Capacity      int       `json:"capacity"`
-	ReportedCalls int       `json:"reportedCalls"`
-	PlacedCalls   int       `json:"placedCalls"`
-	ExternalCalls int       `json:"externalCalls"`
-	Load          int       `json:"load"`
-	Available     int       `json:"available"`
-	LastSeen      time.Time `json:"lastSeen"`
+	ID           string    `json:"id"`
+	Region       string    `json:"region"`
+	Capacity     int       `json:"capacity"`
+	CurrentCalls int       `json:"currentCalls"`
+	Available    int       `json:"available"`
+	LastSeen     time.Time `json:"lastSeen"`
 }
 
 // Registry holds the whole service state. Every method takes mu for its entire
@@ -83,7 +76,9 @@ func New() *Registry {
 }
 
 // UpsertNode applies a capacity report, creating the node if it is unknown, and
-// reports whether it was created.
+// reports whether it was created. The reported figure replaces whatever we were
+// holding, because the node is the authority on its own load; allocations made
+// since then adjust it locally until the next report arrives.
 func (r *Registry) UpsertNode(rep Report) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -96,12 +91,7 @@ func (r *Registry) UpsertNode(rep Report) bool {
 
 	n.region = rep.Region
 	n.capacity = rep.Capacity
-	n.reported = rep.CurrentCalls
-	// A report is a snapshot that may predate calls we have only just placed, so
-	// we keep our own count and treat the surplus as load from somewhere else.
-	// Rebasing rather than accumulating is what keeps the figure honest between
-	// reports; see DESIGN.md.
-	n.external = max(0, rep.CurrentCalls-n.placed)
+	n.currentCalls = rep.CurrentCalls
 	n.lastSeen = time.Now()
 
 	return !found
@@ -120,8 +110,8 @@ func (r *Registry) Terminate(callID string) error {
 
 	// The node may have vanished since the call was placed, so only give back a
 	// slot we can still see.
-	if n, ok := r.nodes[c.nodeID]; ok && n.placed > 0 {
-		n.placed--
+	if n, ok := r.nodes[c.nodeID]; ok && n.currentCalls > 0 {
+		n.currentCalls--
 	}
 	return nil
 }
@@ -145,7 +135,14 @@ func (r *Registry) Snapshot() []NodeStatus {
 
 	out := make([]NodeStatus, 0, len(r.nodes))
 	for _, n := range r.nodes {
-		out = append(out, r.statusLocked(n))
+		out = append(out, NodeStatus{
+			ID:           n.id,
+			Region:       n.region,
+			Capacity:     n.capacity,
+			CurrentCalls: n.currentCalls,
+			Available:    n.available(),
+			LastSeen:     n.lastSeen,
+		})
 	}
 	slices.SortFunc(out, func(a, b NodeStatus) int { return strings.Compare(a.ID, b.ID) })
 	return out
@@ -153,14 +150,12 @@ func (r *Registry) Snapshot() []NodeStatus {
 
 // Node returns one node's status.
 func (r *Registry) Node(id string) (NodeStatus, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	n, ok := r.nodes[id]
-	if !ok {
-		return NodeStatus{}, false
+	for _, n := range r.Snapshot() {
+		if n.ID == id {
+			return n, true
+		}
 	}
-	return r.statusLocked(n), true
+	return NodeStatus{}, false
 }
 
 // NodeCount reports how many nodes have registered, for the readiness endpoint.
@@ -168,18 +163,4 @@ func (r *Registry) NodeCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.nodes)
-}
-
-func (r *Registry) statusLocked(n *node) NodeStatus {
-	return NodeStatus{
-		ID:            n.id,
-		Region:        n.region,
-		Capacity:      n.capacity,
-		ReportedCalls: n.reported,
-		PlacedCalls:   n.placed,
-		ExternalCalls: n.external,
-		Load:          n.load(),
-		Available:     n.available(),
-		LastSeen:      n.lastSeen,
-	}
 }

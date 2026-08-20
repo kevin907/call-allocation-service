@@ -35,7 +35,7 @@ func (r *Registry) Allocate(callID, region string) (Allocation, bool, error) {
 
 	c := &call{id: callID, nodeID: n.id, region: region, allocatedAt: time.Now()}
 	r.calls[callID] = c
-	n.placed++
+	n.currentCalls++
 
 	return c.allocation(), true, nil
 }

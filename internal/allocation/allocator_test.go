@@ -36,67 +36,6 @@ func mustAllocate(t *testing.T, r *Registry, callID, region string) string {
 	return a.NodeID
 }
 
-func TestUpsertNode_ReportRebasesExternalLoad(t *testing.T) {
-	tests := []struct {
-		name         string
-		placed       int
-		reported     int
-		wantExternal int
-		wantLoad     int
-	}{
-		{"report matches our own count", 25, 25, 0, 25},
-		{"report lags our placements", 25, 20, 0, 25},
-		{"report includes load from elsewhere", 25, 45, 20, 45},
-		{"nothing placed yet", 0, 20, 20, 20},
-		{"idle node", 0, 0, 0, 0},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			r := newTestRegistry(t)
-			r.UpsertNode(report("node-1", "eu-west", 100, 0))
-			for i := range tc.placed {
-				mustAllocate(t, r, fmt.Sprintf("call-%d", i), "eu-west")
-			}
-
-			r.UpsertNode(report("node-1", "eu-west", 100, tc.reported))
-
-			got := nodeState(t, r, "node-1")
-			if got.ExternalCalls != tc.wantExternal || got.Load != tc.wantLoad {
-				t.Errorf("external=%d load=%d, want external=%d load=%d",
-					got.ExternalCalls, got.Load, tc.wantExternal, tc.wantLoad)
-			}
-			if got.PlacedCalls != tc.placed {
-				t.Errorf("a report must never disturb placed: got %d, want %d", got.PlacedCalls, tc.placed)
-			}
-		})
-	}
-}
-
-// The rebase and the tempting max(reported, placed) agree at the instant of a
-// report and diverge immediately after, which is the whole reason for the extra
-// counter.
-func TestUpsertNode_PlacementsAfterAReportStillCount(t *testing.T) {
-	r := newTestRegistry(t)
-	r.UpsertNode(report("node-1", "eu-west", 100, 0))
-	for i := range 25 {
-		mustAllocate(t, r, fmt.Sprintf("ours-%d", i), "eu-west")
-	}
-	r.UpsertNode(report("node-1", "eu-west", 100, 45)) // 20 calls arrived from elsewhere
-
-	for i := range 5 {
-		mustAllocate(t, r, fmt.Sprintf("after-%d", i), "eu-west")
-	}
-
-	got := nodeState(t, r, "node-1")
-	if got.Load != 50 {
-		t.Errorf("load = %d, want 50: max(reported,placed) would give 45 and lose the five new calls", got.Load)
-	}
-	if got.Available != 50 {
-		t.Errorf("available = %d, want 50", got.Available)
-	}
-}
-
 func TestAllocate_PicksMostAvailableNode(t *testing.T) {
 	r := newTestRegistry(t)
 	// Utilisation ordering would pick node-c and saturate four slots while 150
@@ -138,6 +77,38 @@ func TestAllocate_TieBreakIsDeterministic(t *testing.T) {
 	}
 }
 
+// A report replaces the node's figure, and allocations adjust it locally until
+// the next one. Without the local adjustment every call in a reporting interval
+// would see the same snapshot and pick the same winner.
+func TestUpsertNode_ReportReplacesAndAllocationsAdjust(t *testing.T) {
+	r := newTestRegistry(t)
+	r.UpsertNode(report("node-1", "eu-west", 100, 20))
+
+	if got := nodeState(t, r, "node-1"); got.CurrentCalls != 20 || got.Available != 80 {
+		t.Fatalf("after a report: currentCalls=%d available=%d, want 20/80", got.CurrentCalls, got.Available)
+	}
+
+	for i := range 5 {
+		mustAllocate(t, r, fmt.Sprintf("call-%d", i), "eu-west")
+	}
+	if got := nodeState(t, r, "node-1"); got.CurrentCalls != 25 || got.Available != 75 {
+		t.Errorf("after five placements: currentCalls=%d available=%d, want 25/75", got.CurrentCalls, got.Available)
+	}
+
+	if err := r.Terminate("call-0"); err != nil {
+		t.Fatalf("Terminate: %v", err)
+	}
+	if got := nodeState(t, r, "node-1"); got.CurrentCalls != 24 {
+		t.Errorf("after a termination: currentCalls=%d, want 24", got.CurrentCalls)
+	}
+
+	// The node is the authority on its own load, so its next word wins.
+	r.UpsertNode(report("node-1", "eu-west", 100, 40))
+	if got := nodeState(t, r, "node-1"); got.CurrentCalls != 40 {
+		t.Errorf("after a fresh report: currentCalls=%d, want 40", got.CurrentCalls)
+	}
+}
+
 func TestAllocate_SpreadsLoadBetweenReports(t *testing.T) {
 	r := newTestRegistry(t)
 	r.UpsertNode(report("node-a", "eu-west", 100, 0))
@@ -150,8 +121,8 @@ func TestAllocate_SpreadsLoadBetweenReports(t *testing.T) {
 	}
 
 	a, b := nodeState(t, r, "node-a"), nodeState(t, r, "node-b")
-	if a.PlacedCalls != 50 || b.PlacedCalls != 50 {
-		t.Errorf("placed a=%d b=%d, want an even 50/50 split", a.PlacedCalls, b.PlacedCalls)
+	if a.CurrentCalls != 50 || b.CurrentCalls != 50 {
+		t.Errorf("currentCalls a=%d b=%d, want an even 50/50 split", a.CurrentCalls, b.CurrentCalls)
 	}
 }
 
@@ -178,8 +149,8 @@ func TestAllocate_AffinityReturnsTheSameNode(t *testing.T) {
 		}
 	}
 
-	if got := nodeState(t, r, first.NodeID); got.PlacedCalls != 1 {
-		t.Errorf("placed = %d, want 1: repeats must not consume capacity", got.PlacedCalls)
+	if got := nodeState(t, r, first.NodeID); got.CurrentCalls != 1 {
+		t.Errorf("currentCalls = %d, want 1: repeats must not consume capacity", got.CurrentCalls)
 	}
 }
 
@@ -204,11 +175,11 @@ func TestAllocate_AffinityOutlivesARegionChange(t *testing.T) {
 	if got.Region != "eu-west" {
 		t.Errorf("region = %q, want the pinned eu-west", got.Region)
 	}
-	if placed := nodeState(t, r, "node-us"); placed.PlacedCalls != 0 {
-		t.Errorf("no capacity may be taken in the requested region: placed = %d", placed.PlacedCalls)
+	if n := nodeState(t, r, "node-us"); n.CurrentCalls != 0 {
+		t.Errorf("no capacity may be taken in the requested region: currentCalls = %d", n.CurrentCalls)
 	}
-	if placed := nodeState(t, r, "node-eu"); placed.PlacedCalls != 1 {
-		t.Errorf("the pinned node still holds exactly one call, got %d", placed.PlacedCalls)
+	if n := nodeState(t, r, "node-eu"); n.CurrentCalls != 1 {
+		t.Errorf("the pinned node still holds exactly one call, got %d", n.CurrentCalls)
 	}
 }
 
@@ -271,8 +242,8 @@ func TestTerminate_ReleasesCapacityExactlyOnce(t *testing.T) {
 	if err := r.Terminate("call-1"); !errors.Is(err, ErrCallNotFound) {
 		t.Errorf("second terminate: got %v, want ErrCallNotFound", err)
 	}
-	if got := nodeState(t, r, "node-a"); got.PlacedCalls != 1 {
-		t.Errorf("placed = %d, want 1: a repeated terminate must not free a slot twice", got.PlacedCalls)
+	if got := nodeState(t, r, "node-a"); got.CurrentCalls != 1 {
+		t.Errorf("currentCalls = %d, want 1: a repeated terminate must not free a slot twice", got.CurrentCalls)
 	}
 }
 

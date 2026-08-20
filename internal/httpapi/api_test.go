@@ -219,8 +219,8 @@ func TestAllocate_AffinityWinsOverTheRequestedRegion(t *testing.T) {
 	// No capacity may be taken in the region that was asked for.
 	for _, n := range decode(t, do(t, srv, http.MethodGet, "/nodes", ""))["nodes"].([]any) {
 		node := n.(map[string]any)
-		if node["id"] == "node-us" && node["placedCalls"] != float64(0) {
-			t.Errorf("node-us placedCalls = %v, want 0", node["placedCalls"])
+		if node["id"] == "node-us" && node["currentCalls"] != float64(0) {
+			t.Errorf("node-us currentCalls = %v, want 0", node["currentCalls"])
 		}
 	}
 }

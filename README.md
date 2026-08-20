@@ -97,13 +97,13 @@ curl -X POST localhost:8080/calls -H 'Content-Type: application/json' \
 {"error":"no_nodes_in_region","message":"no healthy node registered in region"}
 ```
 
-The fleet view shows how the accounting works. `node-eu-1` reported 20 calls of its own and we
-have placed 1, so its load is 21 and 79 slots remain:
+The fleet view. `node-eu-1` last reported 20 calls and we have placed one on it since, so it is
+holding 21 with 79 slots free:
 
 ```
 curl localhost:8080/nodes
 
-{"nodes":[{"id":"node-eu-1","region":"eu-west","capacity":100,"reportedCalls":20,"placedCalls":1,"externalCalls":20,"load":21,"available":79,"lastSeen":"..."}, ...]}
+{"nodes":[{"id":"node-eu-1","region":"eu-west","capacity":100,"currentCalls":21,"available":79,"lastSeen":"..."}, ...]}
 ```
 
 End the call, then end it again:
