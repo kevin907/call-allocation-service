@@ -177,8 +177,8 @@ first="$(curl -s -X POST "$B/calls" -H "$J" -d '{"callId":"abc123","region":"eu-
 check "allocation picks the node with most free capacity" '{"nodeId":"node-eu-1"}' "$first"
 again="$(curl -s -X POST "$B/calls" -H "$J" -d '{"callId":"abc123","region":"eu-west"}')"
 check "affinity returns the same node" "$first" "$again"
-check "region conflict is refused" "409" \
-  "$(api -X POST "$B/calls" -H "$J" -d '{"callId":"abc123","region":"us-east"}')"
+check "affinity survives a different region" "$first" \
+  "$(curl -s -X POST "$B/calls" -H "$J" -d '{"callId":"abc123","region":"us-east"}')"
 check "unknown region" "503" \
   "$(api -X POST "$B/calls" -H "$J" -d '{"callId":"zzz","region":"ap-south"}')"
 check "terminate" "204" "$(api -X DELETE "$B/calls/abc123")"

@@ -223,23 +223,32 @@ func TestAllocate_AffinityOutlivesNodeHealth(t *testing.T) {
 	}
 }
 
-func TestAllocate_RegionConflictIsRefusedWithoutSideEffects(t *testing.T) {
+// "It must always return the same node while the call remains active" admits no
+// exception, so a caller naming a different region still gets the pinned node.
+func TestAllocate_AffinityOutlivesARegionChange(t *testing.T) {
 	r, _ := newTestRegistry(t)
 	r.UpsertNode(report("node-eu", "eu-west", 100, 0))
 	r.UpsertNode(report("node-us", "us-east", 100, 0))
 	mustAllocate(t, r, "abc123", "eu-west")
 
-	_, _, err := r.Allocate("abc123", "us-east")
-
-	var conflict *RegionConflictError
-	if !errors.As(err, &conflict) {
-		t.Fatalf("got %v, want a RegionConflictError", err)
+	got, created, err := r.Allocate("abc123", "us-east")
+	if err != nil {
+		t.Fatalf("Allocate: %v", err)
 	}
-	if conflict.NodeID != "node-eu" || conflict.Region != "eu-west" {
-		t.Errorf("conflict names %s/%s, want node-eu/eu-west", conflict.NodeID, conflict.Region)
+	if created {
+		t.Error("re-allocating an active call must not report a new placement")
 	}
-	if got := nodeState(t, r, "node-us"); got.PlacedCalls != 0 {
-		t.Errorf("a refused allocation must not touch the other region: placed = %d", got.PlacedCalls)
+	if got.NodeID != "node-eu" {
+		t.Errorf("nodeId = %q, want node-eu", got.NodeID)
+	}
+	if got.Region != "eu-west" {
+		t.Errorf("region = %q, want the pinned eu-west", got.Region)
+	}
+	if placed := nodeState(t, r, "node-us"); placed.PlacedCalls != 0 {
+		t.Errorf("no capacity may be taken in the requested region: placed = %d", placed.PlacedCalls)
+	}
+	if placed := nodeState(t, r, "node-eu"); placed.PlacedCalls != 1 {
+		t.Errorf("the pinned node still holds exactly one call, got %d", placed.PlacedCalls)
 	}
 }
 

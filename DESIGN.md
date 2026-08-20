@@ -3,8 +3,8 @@
 ## Allocation
 
 Within the requested region a call goes to the healthy node with the most **absolute free
-capacity** (`capacity - load`), ties broken on lowest node id so selection is deterministic and
-therefore testable. Full nodes are ineligible: media capacity is a hard limit, not a queue.
+capacity** (`capacity - load`), ties broken on lowest node id, so selection is deterministic
+and testable. Full nodes are ineligible: media capacity is a hard limit, not a queue.
 
 Headroom beats utilisation ratio — given nodes of 1000/900, 100/50 and 4/0, ratio ordering
 saturates the four-slot node while 150 slots sit idle. Ratio would be safer only if capacity were
@@ -17,22 +17,20 @@ report alone stampedes one node: every call between two heartbeats sees the same
 picks the same winner.
 
 So each node keeps `reported`, `placed` (ours) and `external`; every report rebases
-`external = max(0, reported - placed)`, leaving `placed` alone. The tempting `max(reported, placed)`
-agrees only at the instant of a report — with reported 45 and placed 25, five further placements
+`external = max(0, reported - placed)`, leaving `placed` alone. `max(reported, placed)` agrees
+only at the instant of a report — with reported 45 and placed 25, five further placements
 give 50 under the rebase but 45 under the max. **Limitation:** this converges within one report
 interval rather than being exact.
 
 ## Affinity and lifecycle
 
 A call's node is recorded at placement and returned on every repeat, making allocation safely
-retryable after a timeout. Affinity resolves before any health or capacity filter: flowing media
-cannot be re-homed by editing a map.
-
-**Assumption.** The brief's two rules collide when a live `callId` is re-allocated into a
-*different* region. I return `409` naming the existing pin rather than silently breaking either;
-within the requested region affinity is absolute. Termination frees the slot; an unknown call is `404`,
-though a retry-prone caller would prefer `204`. Nodes silent for `NODE_TTL` (30s) are excluded
-from new allocations but retained, so they recover on their next report.
+retryable after a timeout. Affinity resolves before any health, capacity or region filter: flowing
+media cannot be re-homed by editing a map. **Trade-off:** so a live `callId` re-allocated into a
+*different* region still returns its pinned node, with the mismatch logged rather than raised. A
+`409` would serve the caller better but would break a stated requirement to satisfy an inferred
+one. Termination frees the slot; an unknown call is `404`, though a retry-prone caller would prefer
+`204`. Nodes silent for `NODE_TTL` (30s) are excluded from new allocations but retained.
 
 ## One instance
 

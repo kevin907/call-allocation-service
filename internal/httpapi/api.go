@@ -145,6 +145,14 @@ func (s *Server) allocateCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The call keeps its node whatever region the caller now asks for. That is
+	// what the affinity requirement demands, but a caller naming a different
+	// region than the one the call is pinned in usually has a bug, so say so.
+	if a.Region != region {
+		s.log.WarnContext(r.Context(), "call is pinned in a different region than requested",
+			"callId", a.CallID, "nodeId", a.NodeID, "pinnedRegion", a.Region, "requestedRegion", region)
+	}
+
 	status := http.StatusOK
 	if created {
 		status = http.StatusCreated

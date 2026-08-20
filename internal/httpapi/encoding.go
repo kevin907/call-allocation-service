@@ -18,7 +18,6 @@ const maxBodyBytes = 64 << 10
 const (
 	codeInvalidRequest   = "invalid_request"
 	codeIDMismatch       = "id_mismatch"
-	codeRegionMismatch   = "region_mismatch"
 	codeCallNotFound     = "call_not_found"
 	codeNoNodesInRegion  = "no_nodes_in_region"
 	codeNoCapacity       = "no_capacity"
@@ -106,13 +105,10 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	)
 
 	var explicit statusError
-	var conflict *allocation.RegionConflictError
 
 	switch {
 	case errors.As(err, &explicit):
 		status, code, message = explicit.status, explicit.code, explicit.message
-	case errors.As(err, &conflict):
-		status, code = http.StatusConflict, codeRegionMismatch
 	case errors.Is(err, allocation.ErrCallNotFound):
 		status, code = http.StatusNotFound, codeCallNotFound
 	case errors.Is(err, allocation.ErrNoNodesInRegion):

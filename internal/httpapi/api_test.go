@@ -201,21 +201,23 @@ func TestAllocate_AffinityIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestAllocate_RegionMismatchConflicts(t *testing.T) {
+// Affinity admits no exception: an active call keeps its node even when the
+// caller asks for a different region.
+func TestAllocate_AffinityWinsOverTheRequestedRegion(t *testing.T) {
 	srv := newTestServer(t)
 	registerNode(t, srv, "node-eu", "eu-west", 100, 0)
 	registerNode(t, srv, "node-us", "us-east", 100, 0)
 	do(t, srv, http.MethodPost, "/calls", `{"callId":"abc123","region":"eu-west"}`)
 
 	resp := do(t, srv, http.MethodPost, "/calls", `{"callId":"abc123","region":"us-east"}`)
-	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if got := errorCode(t, resp); got != "region_mismatch" {
-		t.Errorf("error = %q, want region_mismatch", got)
+	if got := decode(t, resp)["nodeId"]; got != "node-eu" {
+		t.Errorf("nodeId = %v, want node-eu", got)
 	}
 
-	// The refusal must not have consumed capacity in the other region.
+	// No capacity may be taken in the region that was asked for.
 	for _, n := range decode(t, do(t, srv, http.MethodGet, "/nodes", ""))["nodes"].([]any) {
 		node := n.(map[string]any)
 		if node["id"] == "node-us" && node["placedCalls"] != float64(0) {

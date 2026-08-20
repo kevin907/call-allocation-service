@@ -1,9 +1,6 @@
 package allocation
 
-import (
-	"errors"
-	"fmt"
-)
+import "errors"
 
 var (
 	// ErrNoNodesInRegion covers both an unknown region and one whose nodes have
@@ -15,32 +12,18 @@ var (
 	ErrCallNotFound    = errors.New("call not found")
 )
 
-// RegionConflictError reports that a call is already active somewhere else. It
-// carries the existing pin because the caller needs it to recover, which is why
-// it is a type rather than a sentinel.
-type RegionConflictError struct {
-	CallID string
-	NodeID string
-	Region string
-}
-
-func (e *RegionConflictError) Error() string {
-	return fmt.Sprintf("call %s is already active on node %s in region %s", e.CallID, e.NodeID, e.Region)
-}
-
 // Allocate places a call on a node in the requested region, or returns the node
 // it is already pinned to. It reports whether a new placement was made.
 func (r *Registry) Allocate(callID, region string) (Allocation, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Affinity is resolved before any health or capacity filter. An active call
-	// keeps its node even once that node is full or has gone quiet, because
-	// media already flowing cannot be re-homed by editing a map.
+	// Affinity is resolved before any health or capacity filter, and before the
+	// requested region is even consulted. An active call keeps its node once that
+	// node is full, once it has gone quiet, and even if the caller now names a
+	// different region: media already flowing cannot be re-homed by editing a
+	// map, and the brief admits no exception to returning the same node.
 	if c, ok := r.calls[callID]; ok {
-		if c.region != region {
-			return Allocation{}, false, &RegionConflictError{CallID: callID, NodeID: c.nodeID, Region: c.region}
-		}
 		return c.allocation(), false, nil
 	}
 

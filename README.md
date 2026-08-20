@@ -29,15 +29,15 @@ It listens on `:8080`.
 |---|---|---|---|---|
 | `PUT` | `/nodes/{id}` | `{"id","region","capacity","currentCalls"}` | `201` first registration, `200` refresh | `400` |
 | `GET` | `/nodes` | – | `200` fleet view | – |
-| `POST` | `/calls` | `{"callId","region"}` | `201` placed (+ `Location`), `200` already active | `400` `409` `503` |
+| `POST` | `/calls` | `{"callId","region"}` | `201` placed (+ `Location`), `200` already active | `400` `503` |
 | `GET` | `/calls/{callId}` | – | `200` | `400` `404` |
 | `DELETE` | `/calls/{callId}` | – | `204` | `400` `404` |
 | `GET` | `/healthz` | – | `200` liveness | – |
 | `GET` | `/readyz` | – | `200` readiness, reports fleet size | – |
 
 Errors are `{"error":"<code>","message":"<human>"}`. The codes are `invalid_request`,
-`id_mismatch`, `region_mismatch`, `call_not_found`, `no_nodes_in_region`, `no_capacity`,
-`payload_too_large`, `unsupported_media_type` and `internal`.
+`id_mismatch`, `call_not_found`, `no_nodes_in_region`, `no_capacity`, `payload_too_large`,
+`unsupported_media_type` and `internal`.
 
 `id` in the node body is optional; the path is authoritative and a disagreement is a `400`. Both
 `503`s carry `Retry-After`. Unknown paths and wrong methods are answered by the standard library,
@@ -78,14 +78,14 @@ curl -X POST localhost:8080/calls -H 'Content-Type: application/json' \
 {"nodeId":"node-eu-1"}
 ```
 
-Asking for the same call in a different region is refused rather than silently answered with the
-wrong region's node:
+Affinity admits no exception. Even asked for a different region, an active call keeps its node —
+the mismatch is logged for the operator rather than turned into an error for the caller:
 
 ```
 curl -X POST localhost:8080/calls -H 'Content-Type: application/json' \
   -d '{"callId":"abc123","region":"us-east"}'
 
-{"error":"region_mismatch","message":"call abc123 is already active on node node-eu-1 in region eu-west"}
+{"nodeId":"node-eu-1"}
 ```
 
 A region nobody has registered in:
