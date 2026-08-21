@@ -7,9 +7,7 @@ frees the capacity when the call ends.
 State is held in memory in a single instance, as the brief specifies. See [DESIGN.md](DESIGN.md)
 for the decisions and their trade-offs.
 
-The allocation policy is about forty lines in
-[internal/allocation/allocator.go](internal/allocation/allocator.go), which is the place to look
-first.
+The core allocation policy is implemented in `internal/allocation/allocator.go`.
 
 ## Run it
 
@@ -135,7 +133,7 @@ docker build -t call-allocation-service:dev .
 docker run --rm -p 8080:8080 call-allocation-service:dev
 ```
 
-The image is a static binary on `distroless/static`, about 8 MB, running as `nonroot`. It needs
+The image is a static binary on `distroless/static`, a small distroless runtime image, running as `nonroot`. It needs
 no writable filesystem or capabilities:
 
 ```
@@ -181,8 +179,8 @@ one slot, the other runs 200 concurrent allocations against 10 slots and asserts
 succeed. Both are the requirements that naive implementations get wrong.
 
 [scripts/verify-k8s.sh](scripts/verify-k8s.sh) covers what unit tests cannot. It builds the
-image, stands up a throwaway kind cluster, applies the manifests and makes 29 assertions about the
-running deployment — that the Service selector actually matches a pod, that the probes pass, that
+image, stands up a throwaway kind cluster, applies the manifests and performs end-to-end assertions about the
+running deployment - that the Service selector actually matches a pod, that the probes pass, that
 the container survives its own `securityContext`, that the API answers through the Service, that
 a rollout never runs two pods at once, that state is gone afterwards, and that probe traffic
 stays out of the log. It creates the cluster only if one is not already there, and removes it
