@@ -1,0 +1,7 @@
+# Build output
+/bin/
+/call-allocation-service
+
+# Test and coverage artefacts
+*.test
+*.out

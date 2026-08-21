@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: call-allocation-service
+  namespace: call-allocation
+  labels:
+    app.kubernetes.io/name: call-allocation-service
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: call-allocation-service
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

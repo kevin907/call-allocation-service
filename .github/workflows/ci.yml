@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: lint and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt-clean:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race -cover ./...
+
+  container:
+    name: container image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build
+        run: docker build -t call-allocation-service:dev .
+
+      - name: run and exercise the API
+        run: |
+          docker run -d --name cas -p 8080:8080 \
+            --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+            call-allocation-service:dev
+          for _ in $(seq 1 40); do
+            [ "$(curl -s localhost:8080/healthz)" = '{"status":"ok"}' ] && break
+            sleep 0.5
+          done
+          curl -fsS -X PUT localhost:8080/nodes/node-eu-1 -H 'Content-Type: application/json' \
+            -d '{"id":"node-eu-1","region":"eu-west","capacity":100,"currentCalls":20}' >/dev/null
+          test "$(curl -fsS -X POST localhost:8080/calls -H 'Content-Type: application/json' \
+            -d '{"callId":"abc123","region":"eu-west"}')" = '{"nodeId":"node-eu-1"}'
+
+      - name: stop gracefully
+        run: |
+          docker stop cas
+          test "$(docker inspect cas --format '{{.State.ExitCode}}')" = "0"
+
+  kubernetes:
+    name: deploy to kind
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: cas-verify
+
+      # Applies the manifests for real and asserts the things a dry-run cannot
+      # see: endpoints, probes, securityContext, Recreate, state loss.
+      - name: verify the deployment
+        run: ./scripts/verify-k8s.sh
+        env:
+          KIND_CLUSTER: cas-verify

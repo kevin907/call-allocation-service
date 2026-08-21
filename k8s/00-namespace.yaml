@@ -1,0 +1,8 @@
+# Numbered so that `kubectl apply -f k8s/`, which walks the directory in lexical
+# order, creates the namespace before anything that goes in it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: call-allocation
+  labels:
+    app.kubernetes.io/name: call-allocation-service

@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: call-allocation-service
+  namespace: call-allocation
+  labels:
+    app.kubernetes.io/name: call-allocation-service
+    app.kubernetes.io/component: allocator
+spec:
+  replicas: 1
+  # Every mapping this service holds lives in one pod's memory. A RollingUpdate
+  # at one replica still rounds maxSurge up to one pod, so two instances with
+  # disjoint call tables would briefly sit behind the same Service and some
+  # allocations would be answered from an empty registry. Recreate trades a few
+  # seconds of downtime for never being silently wrong.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: call-allocation-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: call-allocation-service
+        app.kubernetes.io/component: allocator
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 15
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: call-allocation-service
+          image: call-allocation-service:dev
+          # The image is built locally and loaded into the cluster directly;
+          # there is no registry to pull it from.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: LOG_LEVEL
+              value: "info"
+          # A liveness restart is not a recovery here: it discards every
+          # call-to-node mapping in the process. So liveness only asks whether
+          # the process is alive, and gets a full minute of grace before acting;
+          # readiness carries the traffic gating.
+          #
+          # timeoutSeconds is raised from the default 1s on both. The service
+          # answers in microseconds, so a probe that times out means the node was
+          # starved, not that the service is broken - and treating a busy node as
+          # a dead one costs an endpoint flap or, worse, a restart.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            # No CPU limit: throttling an allocator adds latency to every call,
+            # and the request is enough to get it scheduled sensibly. The memory
+            # limit is a backstop against the unbounded call map.
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
