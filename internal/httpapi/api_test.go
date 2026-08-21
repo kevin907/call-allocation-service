@@ -134,6 +134,12 @@ func TestUpsertNode_Validation(t *testing.T) {
 		{"unknown field", `{"region":"eu-west","capacity":10,"currentCalls":0,"capcity":5}`, "invalid_request"},
 		{"malformed json", `{"region":`, "invalid_request"},
 		{"trailing object", `{"region":"eu-west","capacity":1,"currentCalls":0}{}`, "invalid_request"},
+		// Decoder.More answers false before a "]" or "}", so these need the
+		// second decode rather than the More check to be caught.
+		{"trailing bracket", `{"region":"eu-west","capacity":1,"currentCalls":0}]`, "invalid_request"},
+		{"trailing brace", `{"region":"eu-west","capacity":1,"currentCalls":0}}`, "invalid_request"},
+		{"trailing scalar", `{"region":"eu-west","capacity":1,"currentCalls":0} 5`, "invalid_request"},
+		{"two objects", `{"region":"eu-west","capacity":1,"currentCalls":0} {"region":"x","capacity":1,"currentCalls":0}`, "invalid_request"},
 	}
 
 	for _, tc := range tests {

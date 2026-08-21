@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"strings"
@@ -59,17 +60,30 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	dec.DisallowUnknownFields()
 
 	if err := dec.Decode(dst); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			return statusError{http.StatusRequestEntityTooLarge, codePayloadTooLarge,
-				fmt.Sprintf("request body exceeds %d bytes", maxBodyBytes)}
-		}
-		return badRequest("malformed JSON: %v", err)
+		return decodeError(err)
 	}
-	if dec.More() {
+
+	// Decoding a second time is the only reliable way to insist the body held
+	// exactly one value. Decoder.More reports on elements inside an array or
+	// object, so it answers false for a stray trailing "]" or "}" and would let
+	// {"callId":"abc"}] through.
+	switch err := dec.Decode(new(json.RawMessage)); {
+	case errors.Is(err, io.EOF):
+		return nil
+	case err == nil:
 		return badRequest("body must contain a single JSON object")
+	default:
+		return decodeError(err)
 	}
-	return nil
+}
+
+func decodeError(err error) error {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return statusError{http.StatusRequestEntityTooLarge, codePayloadTooLarge,
+			fmt.Sprintf("request body exceeds %d bytes", maxBodyBytes)}
+	}
+	return badRequest("malformed JSON: %v", err)
 }
 
 func requireJSONContentType(r *http.Request) error {
